@@ -1,26 +1,29 @@
+
 /**The MIT License (MIT)
 
-Copyright (c) 2018 by Daniel Eichhorn - ThingPulse
+  Copyright (c) 2018 by Daniel Eichhorn - ThingPulse
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
 
-See more at https://thingpulse.com
+  See more at https://thingpulse.com
+  
+  Folrked and added Sensor BME280
 */
 
 #include <ESPWiFi.h>
@@ -35,31 +38,35 @@ See more at https://thingpulse.com
 #include "SSD1306Wire.h"
 #include "OLEDDisplayUi.h"
 #include "Wire.h"
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
 #include "OpenWeatherMapCurrent.h"
 #include "OpenWeatherMapForecast.h"
 #include "WeatherStationFonts.h"
 #include "WeatherStationImages.h"
 
-
+#define SEALEVELPRESSURE_HPA (1013.25)
+//Sensor initialisieren an I2C
+Adafruit_BME280 bme;
 /***************************
- * Begin Settings
+   Begin Settings
  **************************/
 
 // WIFI
-const char* WIFI_SSID = "yourssid";
-const char* WIFI_PWD = "yourpassw0rd";
+const char* WIFI_SSID = "yourSSID";
+const char* WIFI_PWD = "yourPassw0rd";
 
-#define TZ              2       // (utc+) TZ in hours
+#define TZ              1       // (utc+) TZ in hours
 #define DST_MN          60      // use 60mn for summer time in some countries
 
 // Setup
-const int UPDATE_INTERVAL_SECS = 20 * 60; // Update every 20 minutes
+const int UPDATE_INTERVAL_SECS = 3 * 60; // Update every 3 minutes
 
 // Display Settings
 const int I2C_DISPLAY_ADDRESS = 0x3c;
 #if defined(ESP8266)
-const int SDA_PIN = D3;
-const int SDC_PIN = D4;
+const int SDA_PIN = D2;
+const int SDC_PIN = D1;
 #else
 const int SDA_PIN = 5; //D3;
 const int SDC_PIN = 4; //D4;
@@ -70,8 +77,8 @@ const int SDC_PIN = 4; //D4;
 // Sign up here to get an API key:
 // https://docs.thingpulse.com/how-tos/openweathermap-key/
 const boolean IS_METRIC = true;
-String OPEN_WEATHER_MAP_APP_ID = "XXX";
-String OPEN_WEATHER_MAP_LOCATION = "Zurich,CH";
+String OPEN_WEATHER_MAP_APP_ID = "YourAPIKey";
+String OPEN_WEATHER_MAP_LOCATION = "YourCity";
 
 // Pick a language code from this list:
 // Arabic - ar, Bulgarian - bg, Catalan - ca, Czech - cz, German - de, Greek - el,
@@ -89,13 +96,18 @@ const uint8_t MAX_FORECASTS = 4;
 const String WDAY_NAMES[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
 const String MONTH_NAMES[] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
 
+//BME280 Settings
+float localTemp;
+float localHum;
+float localPres;
+
 /***************************
- * End Settings
+   End Settings
  **************************/
- // Initialize the oled display for address 0x3c
- // sda-pin=14 and sdc-pin=12
- SSD1306Wire     display(I2C_DISPLAY_ADDRESS, SDA_PIN, SDC_PIN);
- OLEDDisplayUi   ui( &display );
+// Initialize the oled display for address 0x3c
+// sda-pin=14 and sdc-pin=12
+SSD1306Wire     display(I2C_DISPLAY_ADDRESS, SDA_PIN, SDC_PIN);
+OLEDDisplayUi   ui( &display );
 
 OpenWeatherMapCurrentData currentWeather;
 OpenWeatherMapCurrent currentWeatherClient;
@@ -121,16 +133,15 @@ void updateData(OLEDDisplay *display);
 void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void drawBME(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void drawBME2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex);
 void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state);
 void setReadyForWeatherUpdate();
 
 
-// Add frames
-// this array keeps function pointers to all frames
-// frames are the single views that slide from right to left
-FrameCallback frames[] = { drawDateTime, drawCurrentWeather, drawForecast };
-int numberOfFrames = 3;
+FrameCallback frames[] = { drawDateTime, drawCurrentWeather, drawForecast, drawBME, drawBME2 };
+int numberOfFrames = 5;
 
 OverlayCallback overlays[] = { drawHeaderOverlay };
 int numberOfOverlays = 1;
@@ -139,6 +150,12 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println();
+
+ 
+
+  // default settings
+  // (you can also pass in a Wire library object like &Wire2)
+  
 
   // initialize dispaly
   display.init();
@@ -149,6 +166,21 @@ void setup() {
   display.setFont(ArialMT_Plain_10);
   display.setTextAlignment(TEXT_ALIGN_CENTER);
   display.setContrast(255);
+
+  //Sensorcheck BME280
+  bool status;
+  status = bme.begin();
+  if (!status) {
+    Serial.println("Could not find a valid BME280 sensor, check wiring!");
+    delay(500);
+    Serial.print(".");
+    display.clear();
+    display.drawString(64, 10, "Could not find a valid BME280 sensor, check wiring!");
+    while (1);
+  }
+
+
+
 
   WiFi.begin(WIFI_SSID, WIFI_PWD);
 
@@ -165,6 +197,7 @@ void setup() {
 
     counter++;
   }
+  
   // Get time from network time service
   configTime(TZ_SEC, DST_SEC, "pool.ntp.org");
 
@@ -199,7 +232,7 @@ void setup() {
 
 void loop() {
 
-  if (millis() - timeSinceLastWUpdate > (1000L*UPDATE_INTERVAL_SECS)) {
+  if (millis() - timeSinceLastWUpdate > (1000L * UPDATE_INTERVAL_SECS)) {
     setReadyForWeatherUpdate();
     timeSinceLastWUpdate = millis();
   }
@@ -219,6 +252,8 @@ void loop() {
 
 
 }
+
+
 
 void drawProgress(OLEDDisplay *display, int percentage, String label) {
   display->clear();
@@ -242,6 +277,8 @@ void updateData(OLEDDisplay *display) {
   forecastClient.setAllowedHours(allowedHours, sizeof(allowedHours));
   forecastClient.updateForecasts(forecasts, OPEN_WEATHER_MAP_APP_ID, OPEN_WEATHER_MAP_LOCATION, MAX_FORECASTS);
 
+  drawProgress(display, 80, "Updating local data...");
+  getBME();
   readyForWeatherUpdate = false;
   drawProgress(display, 100, "Done...");
   delay(1000);
@@ -260,7 +297,7 @@ void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, in
   display->setFont(ArialMT_Plain_10);
   String date = WDAY_NAMES[timeInfo->tm_wday];
 
-  sprintf_P(buff, PSTR("%s, %02d/%02d/%04d"), WDAY_NAMES[timeInfo->tm_wday].c_str(), timeInfo->tm_mday, timeInfo->tm_mon+1, timeInfo->tm_year + 1900);
+  sprintf_P(buff, PSTR("%s, %02d/%02d/%04d"), WDAY_NAMES[timeInfo->tm_wday].c_str(), timeInfo->tm_mday, timeInfo->tm_mon + 1, timeInfo->tm_year + 1900);
   display->drawString(64 + x, 5 + y, String(buff));
   display->setFont(ArialMT_Plain_24);
 
@@ -307,6 +344,53 @@ void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
   display->setTextAlignment(TEXT_ALIGN_LEFT);
 }
 
+
+
+void drawBME(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y)
+{
+  
+  display->setFont(ArialMT_Plain_10);
+  display->setTextAlignment(TEXT_ALIGN_CENTER);
+  display->drawString(64 + x, y, "INDOOR");
+    
+  display->setFont(ArialMT_Plain_10);
+  display->setTextAlignment(TEXT_ALIGN_CENTER);
+  display->drawString(64 + x, 38 + y, "Temperature");
+
+  display->setFont(ArialMT_Plain_24);
+  String temp = String(localTemp) + "°C";
+  display->drawString(64 + x, 12 + y, temp);
+  int tempWidth = display->getStringWidth(temp);
+}
+
+void drawBME2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y)
+{
+  
+  display->setFont(ArialMT_Plain_10);
+  display->setTextAlignment(TEXT_ALIGN_CENTER);
+  display->drawString(64 + x, y, "INDOOR");
+  
+  
+  display->setFont(ArialMT_Plain_10);
+  display->setTextAlignment(TEXT_ALIGN_LEFT);
+  display->drawString(0 + x, 38 + y, "Humidity");
+
+  display->setFont(ArialMT_Plain_16);
+  String hum = String(localHum) + "%";
+  display->drawString(x, 18 + y, hum);
+  int humWidth = display->getStringWidth(hum);
+
+   
+  display->setFont(ArialMT_Plain_10);
+  display->setTextAlignment(TEXT_ALIGN_RIGHT);
+  display->drawString(128 + x, 38 + y, "Pressure");
+
+  display->setFont(ArialMT_Plain_16);
+  String pres = String(localPres) + "h";
+  display->drawString(128 + x, 18 + y, pres);
+  int presWidth = display->getStringWidth(pres);
+
+}
 void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
   now = time(nullptr);
   struct tm* timeInfo;
@@ -327,4 +411,29 @@ void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
 void setReadyForWeatherUpdate() {
   Serial.println("Setting readyForUpdate to true");
   readyForWeatherUpdate = true;
+}
+
+void getBME()
+{
+
+  localTemp = bme.readTemperature();
+  localHum = bme.readHumidity();
+  localPres = bme.readPressure() / 100.0F;
+  /*
+
+    Serial.print("Temperature = ");
+    Serial.print(bme.readTemperature());
+    Serial.println(" *C");
+
+    Serial.print("Pressure = ");
+
+    Serial.print(bme.readPressure() / 100.0F);
+    Serial.println(" hPa");
+
+    Serial.print("Humidity = ");
+    Serial.print(bme.readHumidity());
+    Serial.println(" %");
+
+    Serial.println();
+  */
 }
