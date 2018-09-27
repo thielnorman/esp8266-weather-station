@@ -23,7 +23,7 @@
 
   See more at https://thingpulse.com
   
-  Folrked and added Sensor BME280
+  Forked and added Sensor BME280
 */
 
 #include <ESPWiFi.h>
